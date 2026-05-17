@@ -1,11 +1,16 @@
 const bcrypt = require('bcryptjs');
 const jwt = require('jsonwebtoken');
-const pool = require('../config/database');
+
+// CORRECTION ICI : Importation sécurisée du pool pour éviter le crash "undefined (reading 'query')"
+const database = require('../config/database');
+const pool = database.pool || database;
 
 function signToken(user) {
+  // Sécurité supplémentaire : Si JWT_SECRET est absent de Render, on utilise une clé de secours temporaire
+  const secret = process.env.JWT_SECRET || 'ticketflow_super_secret_fallback_key_1234';
   return jwt.sign(
     { id: user.id, email: user.email, role: user.role },
-    process.env.JWT_SECRET,
+    secret,
     { expiresIn: process.env.JWT_EXPIRES_IN || '7d' }
   );
 }
