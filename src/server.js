@@ -10,10 +10,26 @@ const routes   = require('./routes/index');
 const app  = express();
 const PORT = process.env.PORT || 5000;
 
+// Configuration Helmet pour la production
 app.use(helmet({ crossOriginResourcePolicy: { policy: 'cross-origin' } }));
-app.use(cors({ origin: process.env.FRONTEND_URL || 'http://localhost:5173', credentials: true }));
+
+// CORRECTION CORS : Autorise explicitement ton domaine Vercel de production et le local
+const allowedOrigins = [
+  'https://ticketflow-gold.vercel.app',
+  'http://localhost:5173',
+  process.env.FRONTEND_URL
+].filter(Boolean); // Enlève les valeurs undefined si FRONTEND_URL n'est pas configuré
+
+app.use(cors({ 
+  origin: allowedOrigins, 
+  credentials: true,
+  methods: ['GET', 'POST', 'PUT', 'DELETE', 'OPTIONS'],
+  allowedHeaders: ['Content-Type', 'Authorization']
+}));
+
 app.use(passport.initialize());
 
+// Limitation des requêtes pour la sécurité
 app.use('/api/', rateLimit({ windowMs: 15 * 60 * 1000, max: 300, message: { error: 'Trop de requêtes.' } }));
 
 // Raw pour webhook Flutterwave avant express.json
@@ -24,13 +40,19 @@ app.use(express.urlencoded({ extended: true }));
 // Fichiers statiques (banners)
 app.use('/uploads', express.static(path.join(__dirname, '../uploads')));
 
+// Enregistrement des routes globales
 app.use('/api', routes);
 
+// Route de santé de l'application (Healthcheck Render)
 app.get('/health', (req, res) => res.json({ status: 'ok', timestamp: new Date().toISOString() }));
+
+// Gestion des routes introuvables (404)
 app.use((req, res) => res.status(404).json({ error: `Route ${req.method} ${req.path} introuvable` }));
+
+// Gestionnaire d'erreurs global (500)
 app.use((err, req, res, next) => {
   if (err.code === 'LIMIT_FILE_SIZE') return res.status(400).json({ error: 'Fichier trop volumineux (max 5MB)' });
-  console.error('❌', err.message);
+  console.error('❌ Erreur serveur:', err.message);
   res.status(500).json({ error: err.message || 'Erreur serveur' });
 });
 

@@ -1,12 +1,12 @@
 const bcrypt = require('bcryptjs');
 const jwt = require('jsonwebtoken');
 
-// CORRECTION ICI : Importation sécurisée du pool pour éviter le crash "undefined (reading 'query')"
+// Importation sécurisée du pool pour éviter le crash "undefined (reading 'query')"
 const database = require('../config/database');
 const pool = database.pool || database;
 
 function signToken(user) {
-  // Sécurité supplémentaire : Si JWT_SECRET est absent de Render, on utilise une clé de secours temporaire
+  // Clé secrète harmonisée et partagée avec le middleware
   const secret = process.env.JWT_SECRET || 'ticketflow_super_secret_fallback_key_1234';
   return jwt.sign(
     { id: user.id, email: user.email, role: user.role },
@@ -123,19 +123,17 @@ const sendAnnouncement = async (req, res) => {
     return res.status(400).json({ error: 'title, message et channel requis' });
 
   try {
-    // Récupérer les destinataires
     let query, params;
     if (user_ids && user_ids.length > 0) {
       query = 'SELECT id, fullname, email, phone FROM users WHERE id = ANY($1)';
       params = [user_ids];
     } else {
-      query = 'SELECT id, fullname, email, phone FROM users WHERE role != \'admin\'';
+      query = "SELECT id, fullname, email, phone FROM users WHERE role != 'admin'";
       params = [];
     }
     const usersRes = await pool.query(query, params);
     const recipients = usersRes.rows;
 
-    // Construire les liens WhatsApp pour chaque destinataire
     const whatsappLinks = [];
     const emailList = [];
 
@@ -150,7 +148,6 @@ const sendAnnouncement = async (req, res) => {
       }
     }
 
-    // Enregistrer l'annonce en base
     await pool.query(
       `INSERT INTO announcements (title, message, channel, sent_by, sent_count)
        VALUES ($1,$2,$3,$4,$5)`,
