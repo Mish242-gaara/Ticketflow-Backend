@@ -1,4 +1,7 @@
-const { pool } = require('../config/database');
+// CORRECTION 1 : Importation sécurisée du pool de connexion
+const database = require('../config/database');
+const pool = database.pool || database;
+
 const path = require('path');
 const fs = require('fs');
 
@@ -118,6 +121,7 @@ const createEvent = async (req, res) => {
     if (req.file) {
       fs.unlink(path.join(__dirname, '../../uploads/banners', req.file.filename), () => {});
     }
+    console.error('❌ Erreur lors de la création de l\'événement:', err.message);
     res.status(500).json({ error: err.message });
   } finally {
     client.release();
@@ -223,8 +227,8 @@ const getAdminEvents = async (req, res) => {
       SELECT e.id, e.title, e.slug, e.date, e.location, e.status, e.banner_url,
         e.total_tickets, e.available_tickets, e.organizer, e.created_at,
         COUNT(t.id) as tickets_sold,
-        COUNT(t.id) FILTER (WHERE t.status='used') as tickets_scanned,
-        COALESCE(SUM(p.amount) FILTER (WHERE p.payment_status='success'), 0) as revenue
+        COUNT(t.id) FILTER (WHERE t.status='scanned' OR t.status='used') as tickets_scanned,
+        COALESCE(SUM(p.amount) FILTER (WHERE p.payment_status='success' OR p.payment_status='completed'), 0) as revenue
       FROM events e
       LEFT JOIN tickets t ON t.event_id = e.id
       LEFT JOIN payments p ON p.ticket_id = t.id

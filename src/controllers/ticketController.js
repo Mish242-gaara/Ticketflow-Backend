@@ -1,5 +1,9 @@
 const { v4: uuidv4 } = require('uuid');
-const { pool } = require('../config/database');
+
+// CORRECTION 1 : Importation sécurisée du pool de connexion
+const database = require('../config/database');
+const pool = database.pool || database;
+
 const { createTicketQR } = require('../services/qrService');
 const { generateTicketPDF } = require('../services/pdfService');
 const { initiateFlutterwavePayment, checkPaymentStatus } = require('../services/paymentService');
@@ -191,7 +195,8 @@ const verifyTicket = async (req, res) => {
 
     const ticket = tickRes.rows[0];
 
-    if (ticket.status === 'used') {
+    // HARMONISATION : Gestion des statuts 'used' ou 'scanned' selon les fichiers de migration
+    if (ticket.status === 'used' || ticket.status === 'scanned') {
       await client.query('ROLLBACK');
       await pool.query(`INSERT INTO scans (ticket_id, scanned_by, result, ip_address) VALUES ($1,$2,'USED',$3)`,
         [ticket.id, req.user.id, req.ip]);
@@ -208,7 +213,7 @@ const verifyTicket = async (req, res) => {
     }
 
     await client.query(
-      `UPDATE tickets SET status='used', scanned_at=NOW(), scanned_by=$1, updated_at=NOW() WHERE id=$2`,
+      `UPDATE tickets SET status='scanned', scanned_at=NOW(), scanned_by=$1, updated_at=NOW() WHERE id=$2`,
       [req.user.id, ticket.id]
     );
     await client.query(`INSERT INTO scans (ticket_id, scanned_by, result, ip_address) VALUES ($1,$2,'VALID',$3)`,
@@ -241,13 +246,13 @@ const getAdminStats = async (req, res) => {
     const [totals, revenue, byCategory, recentTickets, scanStats] = await Promise.all([
       pool.query(`SELECT
         COUNT(*) as total,
-        COUNT(*) FILTER (WHERE status IN ('active','used')) as active,
-        COUNT(*) FILTER (WHERE status='used') as scanned,
+        COUNT(*) FILTER (WHERE status IN ('active','used','scanned')) as active,
+        COUNT(*) FILTER (WHERE status IN ('used','scanned')) as scanned,
         COUNT(*) FILTER (WHERE status='pending') as pending
         FROM tickets`),
-      pool.query(`SELECT COALESCE(SUM(amount),0) as total FROM payments WHERE payment_status='success'`),
+      pool.query(`SELECT COALESCE(SUM(amount),0) as total FROM payments WHERE payment_status='success' OR payment_status='completed'`),
       pool.query(`SELECT tc.name, tc.color, COUNT(t.id) as count, tc.price, tc.available_quantity, tc.total_quantity
-        FROM ticket_categories tc LEFT JOIN tickets t ON t.category_id=tc.id GROUP BY tc.id ORDER BY tc.price ASC`),
+        FROM ticket_categories tc LEFT JOIN tickets t ON t.category_id=tc.id GROUP BY tc.id, tc.name, tc.color, tc.price, tc.available_quantity, tc.total_quantity ORDER BY tc.price ASC`),
       pool.query(`SELECT t.holder_name, t.status, t.created_at, tc.name as category, tc.color
         FROM tickets t LEFT JOIN ticket_categories tc ON tc.id=t.category_id
         ORDER BY t.created_at DESC LIMIT 8`),
