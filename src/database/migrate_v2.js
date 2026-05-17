@@ -1,4 +1,5 @@
 const pool = require('../config/database');
+console.log("Connexion ciblée :", process.env.DATABASE_URL);
 async function migrateV2() {
   const client = await pool.connect();
   try {
