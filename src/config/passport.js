@@ -1,7 +1,10 @@
 const passport = require('passport');
 const GoogleStrategy = require('passport-google-oauth20').Strategy;
 const jwt = require('jsonwebtoken');
-const { pool } = require('./database');
+
+// CORRECTION ICI : Importation directe du pool sans les accolades destructurantes
+const database = require('./database');
+const pool = database.pool || database;
 
 passport.use(new GoogleStrategy({
     clientID:     process.env.GOOGLE_CLIENT_ID,
