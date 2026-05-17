@@ -9,13 +9,32 @@ async function updateAdmin() {
     const hash = await bcrypt.hash('admin1234', 10);
     
     console.log("⏳ Connexion à la base de données...");
+    
+    // CORRECTION : On s'assure que la table users existe avant de faire l'opération
+    console.log("⏳ Vérification et création de la table 'users' si nécessaire...");
+    await pool.query(`
+      CREATE TABLE IF NOT EXISTS users (
+        id SERIAL PRIMARY KEY,
+        fullname VARCHAR(255) NOT NULL,
+        email VARCHAR(255) UNIQUE NOT NULL,
+        password VARCHAR(255),
+        phone VARCHAR(50),
+        role VARCHAR(50) DEFAULT 'user',
+        provider VARCHAR(50) DEFAULT 'local',
+        avatar_url TEXT,
+        created_at TIMESTAMP DEFAULT NOW(),
+        updated_at TIMESTAMP DEFAULT NOW()
+      );
+    `);
+
+    console.log("⏳ Exécution de la mise à jour de l'admin...");
     const res = await pool.query(
       "UPDATE users SET password = $1, role = 'admin' WHERE email = 'admin@estam.cg' RETURNING *",
       [hash]
     );
 
     if (res.rowCount === 0) {
-      console.log("❌ Aucun utilisateur trouvé avec l'email admin@estam.cg. Exécution d'un INSERT de secours...");
+      console.log("❌ Aucun utilisateur trouvé avec cet email. Exécution de l'INSERT de secours...");
       await pool.query(
         "INSERT INTO users (fullname, email, password, role) VALUES ('Admin', 'admin@estam.cg', $1, 'admin')",
         [hash]
