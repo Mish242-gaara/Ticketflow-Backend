@@ -1,5 +1,4 @@
-const { pool } = require('../config/database');
-
+const pool = require('../config/database');
 async function migrateV2() {
   const client = await pool.connect();
   try {
