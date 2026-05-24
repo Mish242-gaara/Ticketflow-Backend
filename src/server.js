@@ -11,31 +11,27 @@ const routes = require('./routes/index');
 const app = express();
 const PORT = process.env.PORT || 5000;
 
+// ✅ CORRECTION PROXY : Indispensable pour Render et express-rate-limit
+app.set('trust proxy', 1);
+
 // =============================================
-// LOG DES VARIABLES D'ENVIRONNEMENT (pour débogage)
+// LOG DES VARIABLES D'ENVIRONNEMENT
 // =============================================
 console.log('🔹 [Server] NODE_ENV:', process.env.NODE_ENV);
-console.log('🔹 [Server] FRONTEND_URL:', process.env.FRONTEND_URL);
-console.log('🔹 [Server] BACKEND_URL:', process.env.BACKEND_URL);
 console.log('🔹 [Server] GOOGLE_CALLBACK_URI:', process.env.GOOGLE_CALLBACK_URI);
 
-// ✅ Vérifie que GOOGLE_CALLBACK_URI est défini
 if (!process.env.GOOGLE_CALLBACK_URI) {
-  console.error('❌ GOOGLE_CALLBACK_URI est manquant dans les variables d\'environnement de Render !');
-  console.error('   → Définissez-le dans Render → Settings → Environment Variables');
+  console.error('❌ GOOGLE_CALLBACK_URI est manquant sur Render !');
 }
 
 // =============================================
-// CONFIGURATION SÉCURITÉ
+// CONFIGURATION SÉCURITÉ & CORS
 // =============================================
 app.use(helmet({
   crossOriginResourcePolicy: { policy: 'cross-origin' },
   contentSecurityPolicy: false
 }));
 
-// =============================================
-// CONFIGURATION CORS
-// =============================================
 const allowedOrigins = [
   'https://ticketflow-gold.vercel.app',
   'http://localhost:5173',
@@ -60,9 +56,8 @@ app.use(session({
   cookie: {
     secure: process.env.NODE_ENV === 'production',
     httpOnly: true,
-    sameSite: 'lax',
-    maxAge: 24 * 60 * 60 * 1000,
-    domain: process.env.NODE_ENV === 'production' ? '.onrender.com' : undefined
+    sameSite: process.env.NODE_ENV === 'production' ? 'none' : 'lax', // 'none' nécessaire pour HTTPS cross-site
+    maxAge: 24 * 60 * 60 * 1000
   }
 }));
 
@@ -72,37 +67,28 @@ app.use(session({
 app.use(express.json({ limit: '5mb' }));
 app.use(express.urlencoded({ extended: true }));
 
-// Initialisation de Passport
 app.use(passport.initialize());
 app.use(passport.session());
 
 // =============================================
 // LIMITATION DES REQUÊTES
 // =============================================
-app.use('/api/', rateLimit({
+const limiter = rateLimit({
   windowMs: 15 * 60 * 1000,
   max: 300,
   message: { error: 'Trop de requêtes. Veuillez réessayer plus tard.' }
-}));
+});
+
+app.use('/api/', limiter);
 
 // =============================================
-// FICHIERS STATIQUES
+// ROUTES ET FICHIERS
 // =============================================
 app.use('/uploads', express.static(path.join(__dirname, '../uploads')));
-
-// =============================================
-// ROUTES
-// =============================================
 app.use('/api', routes);
 
-// Route de santé
 app.get('/health', (req, res) => {
-  res.json({
-    status: 'ok',
-    timestamp: new Date().toISOString(),
-    env: process.env.NODE_ENV || 'development',
-    googleCallbackUri: process.env.GOOGLE_CALLBACK_URI
-  });
+  res.json({ status: 'ok', timestamp: new Date().toISOString() });
 });
 
 // =============================================
@@ -113,42 +99,16 @@ app.use((req, res) => {
 });
 
 app.use((err, req, res, next) => {
-  if (err.code === 'LIMIT_FILE_SIZE') {
-    return res.status(400).json({ error: 'Fichier trop volumineux (max 5MB)' });
-  }
   console.error('❌ Erreur serveur:', err.message);
-  res.status(500).json({
-    error: err.message || 'Erreur serveur interne',
-    details: process.env.NODE_ENV === 'development' ? err.stack : undefined
-  });
+  res.status(500).json({ error: err.message || 'Erreur serveur interne' });
 });
 
 // =============================================
-// ANTI-COLD START
-// =============================================
-if (process.env.NODE_ENV === 'production') {
-  setInterval(async () => {
-    try {
-      const response = await fetch(`${process.env.BACKEND_URL || 'https://ticketflow-backend-9xkf.onrender.com'}/health`);
-      if (response.ok) {
-        console.log(`[Keep-Alive] Ping réussi : ${new Date().toISOString()}`);
-      }
-    } catch (error) {
-      console.error('[Keep-Alive] Échec du ping:', error.message);
-    }
-  }, 300000);
-}
-
-// =============================================
-// DÉMARRAGE DU SERVEUR
+// DÉMARRAGE
 // =============================================
 app.listen(PORT, () => {
   console.log(`\n🎟️  TicketFlow Backend — Port ${PORT}`);
   console.log(`   Mode : ${process.env.NODE_ENV || 'development'}`);
-  console.log(`   Frontend URL : ${process.env.FRONTEND_URL || 'http://localhost:5173'}`);
-  console.log(`   Backend URL : ${process.env.BACKEND_URL || 'http://localhost:5000'}`);
-  console.log(`   Google OAuth Callback : ${process.env.GOOGLE_CALLBACK_URI || 'Non défini'}`);
-  console.log(`   Accès : http://localhost:${PORT}\n`);
 });
 
 module.exports = app;
