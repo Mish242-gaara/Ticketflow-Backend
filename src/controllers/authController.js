@@ -1,12 +1,11 @@
 const bcrypt = require('bcryptjs');
 const jwt = require('jsonwebtoken');
 
-// Importation sécurisée du pool pour éviter le crash "undefined (reading 'query')"
+// Importation sécurisée du pool
 const database = require('../config/database');
 const pool = database.pool || database;
 
 function signToken(user) {
-  // Clé secrète harmonisée et partagée avec le middleware
   const secret = process.env.JWT_SECRET || 'ticketflow_super_secret_fallback_key_1234';
   return jwt.sign(
     { id: user.id, email: user.email, role: user.role },
@@ -14,6 +13,10 @@ function signToken(user) {
     { expiresIn: process.env.JWT_EXPIRES_IN || '7d' }
   );
 }
+
+// =============================================
+// FONCTIONS AUTHENTIFICATION
+// =============================================
 
 // POST /api/auth/register
 const register = async (req, res) => {
@@ -98,12 +101,16 @@ const updateProfile = async (req, res) => {
   }
 };
 
-// GET /api/admin/users  (admin)
+// =============================================
+// FONCTIONS ADMIN (Utilisateurs)
+// =============================================
+
+// GET /api/admin/users
 const getAllUsers = async (req, res) => {
   try {
     const result = await pool.query(`
       SELECT u.id, u.fullname, u.email, u.phone, u.role, u.provider,
-        u.avatar_url, u.created_at,
+        u.avatar_url, u.created_at, u.is_blocked, u.unblock_at,
         COUNT(t.id) as tickets_count
       FROM users u
       LEFT JOIN tickets t ON t.user_id = u.id
@@ -116,7 +123,106 @@ const getAllUsers = async (req, res) => {
   }
 };
 
-// POST /api/admin/announcements  (admin)
+// DELETE /api/admin/users/:userId
+const deleteUser = async (req, res) => {
+  const { userId } = req.params;
+  const client = await pool.connect();
+
+  try {
+    await client.query('BEGIN');
+
+    // Supprimer les tickets de l'utilisateur
+    await client.query(`DELETE FROM tickets WHERE user_id = $1`, [userId]);
+
+    // Supprimer les paiements de l'utilisateur
+    await client.query(`DELETE FROM payments WHERE user_id = $1`, [userId]);
+
+    // Supprimer les scans effectués par l'utilisateur
+    await client.query(`DELETE FROM scans WHERE scanned_by = $1`, [userId]);
+
+    // Supprimer l'utilisateur
+    await client.query(`DELETE FROM users WHERE id = $1`, [userId]);
+
+    await client.query('COMMIT');
+    res.json({
+      success: true,
+      message: 'Utilisateur et ses données supprimés avec succès.'
+    });
+  } catch (err) {
+    await client.query('ROLLBACK');
+    console.error('❌ Erreur suppression utilisateur:', err);
+    res.status(500).json({
+      error: 'Erreur lors de la suppression de l\'utilisateur.',
+      details: process.env.NODE_ENV === 'development' ? err.message : undefined
+    });
+  } finally {
+    client.release();
+  }
+};
+
+// POST /api/admin/users/:userId/block
+const blockUser = async (req, res) => {
+  const { userId } = req.params;
+  const { duration } = req.body; // durée en jours ou "permanent"
+
+  try {
+    let unblockAt = null;
+
+    if (duration !== 'permanent') {
+      unblockAt = new Date();
+      unblockAt.setDate(unblockAt.getDate() + parseInt(duration));
+    }
+
+    await pool.query(
+      `UPDATE users
+       SET is_blocked = true, unblock_at = $1
+       WHERE id = $2`,
+      [unblockAt, userId]
+    );
+
+    res.json({
+      success: true,
+      message: `Utilisateur bloqué ${duration === 'permanent' ? 'indéfiniment' : `jusqu'au ${unblockAt.toLocaleDateString('fr-FR')}`}.`
+    });
+  } catch (err) {
+    console.error('❌ Erreur blocage utilisateur:', err);
+    res.status(500).json({
+      error: 'Erreur lors du blocage de l\'utilisateur.',
+      details: process.env.NODE_ENV === 'development' ? err.message : undefined
+    });
+  }
+};
+
+// POST /api/admin/users/:userId/unblock
+const unblockUser = async (req, res) => {
+  const { userId } = req.params;
+
+  try {
+    await pool.query(
+      `UPDATE users
+       SET is_blocked = false, unblock_at = NULL
+       WHERE id = $1`,
+      [userId]
+    );
+
+    res.json({
+      success: true,
+      message: 'Utilisateur débloqué avec succès.'
+    });
+  } catch (err) {
+    console.error('❌ Erreur débloquage utilisateur:', err);
+    res.status(500).json({
+      error: 'Erreur lors du débloquage de l\'utilisateur.',
+      details: process.env.NODE_ENV === 'development' ? err.message : undefined
+    });
+  }
+};
+
+// =============================================
+// FONCTIONS ADMIN (Annonces)
+// =============================================
+
+// POST /api/admin/announcements
 const sendAnnouncement = async (req, res) => {
   const { title, message, channel, user_ids } = req.body;
   if (!title || !message || !channel)
@@ -180,4 +286,59 @@ const getAnnouncements = async (req, res) => {
   }
 };
 
-module.exports = { register, login, me, updateProfile, getAllUsers, sendAnnouncement, getAnnouncements };
+// DELETE /api/admin/announcements/:announcementId
+const deleteAnnouncement = async (req, res) => {
+  const { announcementId } = req.params;
+
+  try {
+    await pool.query(`DELETE FROM announcements WHERE id = $1`, [announcementId]);
+    res.json({
+      success: true,
+      message: 'Annonce supprimée avec succès.'
+    });
+  } catch (err) {
+    console.error('❌ Erreur suppression annonce:', err);
+    res.status(500).json({
+      error: 'Erreur lors de la suppression de l\'annonce.',
+      details: process.env.NODE_ENV === 'development' ? err.message : undefined
+    });
+  }
+};
+
+// DELETE /api/admin/announcements
+const deleteAllAnnouncements = async (req, res) => {
+  try {
+    await pool.query(`DELETE FROM announcements`);
+    res.json({
+      success: true,
+      message: 'Historique des annonces supprimé avec succès.'
+    });
+  } catch (err) {
+    console.error('❌ Erreur suppression historique annonces:', err);
+    res.status(500).json({
+      error: 'Erreur lors de la suppression de l\'historique des annonces.',
+      details: process.env.NODE_ENV === 'development' ? err.message : undefined
+    });
+  }
+};
+
+// =============================================
+// EXPORTS
+// =============================================
+module.exports = {
+  // Auth
+  register,
+  login,
+  me,
+  updateProfile,
+  // Admin Users
+  getAllUsers,
+  deleteUser,
+  blockUser,
+  unblockUser,
+  // Admin Announcements
+  sendAnnouncement,
+  getAnnouncements,
+  deleteAnnouncement,
+  deleteAllAnnouncements
+};

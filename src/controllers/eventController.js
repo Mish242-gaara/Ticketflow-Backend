@@ -1,7 +1,6 @@
-// CORRECTION 1 : Importation sécurisée du pool de connexion
+// Importation sécurisée du pool de connexion
 const database = require('../config/database');
 const pool = database.pool || database;
-
 const path = require('path');
 const fs = require('fs');
 
@@ -51,7 +50,7 @@ const getEvent = async (req, res) => {
   }
 };
 
-// GET /api/events/id/:id  (admin - par ID)
+// GET /api/events/id/:id (admin - par ID)
 const getEventById = async (req, res) => {
   try {
     const result = await pool.query(`
@@ -74,7 +73,7 @@ const getEventById = async (req, res) => {
   }
 };
 
-// POST /api/events  (admin)
+// POST /api/events (admin)
 const createEvent = async (req, res) => {
   const { title, description, long_description, location, date, end_date, organizer, categories } = req.body;
   if (!title || !date) return res.status(400).json({ error: 'Titre et date requis' });
@@ -128,7 +127,7 @@ const createEvent = async (req, res) => {
   }
 };
 
-// PUT /api/events/:id  (admin)
+// PUT /api/events/:id (admin)
 const updateEvent = async (req, res) => {
   const { title, description, long_description, location, date, end_date, organizer, status, categories } = req.body;
   const client = await pool.connect();
@@ -186,7 +185,7 @@ const updateEvent = async (req, res) => {
   }
 };
 
-// DELETE /api/events/:id  (admin - soft delete)
+// DELETE /api/events/:id (admin - soft delete)
 const deleteEvent = async (req, res) => {
   try {
     const result = await pool.query(
@@ -200,11 +199,11 @@ const deleteEvent = async (req, res) => {
   }
 };
 
-// GET /api/events/:id/attendees  (admin)
+// GET /api/events/:id/attendees (admin)
 const getAttendees = async (req, res) => {
   try {
     const result = await pool.query(`
-      SELECT t.id, t.ticket_uuid, t.holder_name, t.holder_phone, t.holder_email,
+      SELECT t.id as ticket_id, t.ticket_uuid, t.holder_name, t.holder_phone, t.holder_email,
         t.status, t.scanned_at, t.created_at,
         tc.name as category_name, tc.price, tc.color,
         p.payment_status, p.method as payment_method, p.transaction_id
@@ -220,7 +219,7 @@ const getAttendees = async (req, res) => {
   }
 };
 
-// GET /api/admin/events  (admin - all events including cancelled)
+// GET /api/admin/events (admin - all events including cancelled)
 const getAdminEvents = async (req, res) => {
   try {
     const result = await pool.query(`
@@ -242,7 +241,140 @@ const getAdminEvents = async (req, res) => {
   }
 };
 
+// =============================================
+// NOUVELLES FONCTIONS POUR LA SUPPRESSION DE PARTICIPANTS
+// =============================================
+
+// DELETE /api/events/:eventId/attendees/:ticketId (Soft Delete)
+const deleteAttendee = async (req, res) => {
+  const { eventId, ticketId } = req.params;
+  const client = await pool.connect();
+  try {
+    await client.query('BEGIN');
+
+    // 1. Récupérer le ticket pour obtenir category_id et vérifier qu'il appartient à l'événement
+    const ticketRes = await client.query(
+      `SELECT category_id, event_id, status, holder_name FROM tickets WHERE id = $1 AND event_id = $2`,
+      [ticketId, eventId]
+    );
+
+    if (!ticketRes.rows.length) {
+      await client.query('ROLLBACK');
+      return res.status(404).json({ error: 'Ticket introuvable pour cet événement' });
+    }
+
+    const { category_id, event_id, status, holder_name } = ticketRes.rows[0];
+
+    // 2. Vérifier que le ticket n'est pas déjà annulé
+    if (status === 'cancelled') {
+      await client.query('ROLLBACK');
+      return res.status(400).json({ error: 'Ce ticket est déjà annulé' });
+    }
+
+    // 3. Soft delete : mettre le ticket en "cancelled"
+    await client.query(
+      `UPDATE tickets SET status='cancelled', updated_at=NOW() WHERE id=$1`,
+      [ticketId]
+    );
+
+    // 4. Libérer la place dans la catégorie
+    await client.query(
+      `UPDATE ticket_categories SET available_quantity = available_quantity + 1 WHERE id = $1`,
+      [category_id]
+    );
+
+    // 5. Mettre à jour les statistiques de l'événement
+    await client.query(
+      `UPDATE events SET
+        available_tickets = available_tickets + 1,
+        total_tickets = total_tickets - 1
+       WHERE id = $1`,
+      [event_id]
+    );
+
+    await client.query('COMMIT');
+    res.json({
+      success: true,
+      message: `Participant "${holder_name}" annulé avec succès. La place a été libérée.`,
+      ticketId: ticketId
+    });
+  } catch (err) {
+    await client.query('ROLLBACK');
+    console.error("Erreur deleteAttendee:", err);
+    res.status(500).json({ error: err.message });
+  } finally {
+    client.release();
+  }
+};
+
+// DELETE /api/events/:eventId/attendees/:ticketId/hard (Hard Delete)
+const hardDeleteAttendee = async (req, res) => {
+  const { eventId, ticketId } = req.params;
+  const client = await pool.connect();
+  try {
+    await client.query('BEGIN');
+
+    // 1. Récupérer le ticket pour obtenir category_id et holder_name
+    const ticketRes = await client.query(
+      `SELECT category_id, event_id, holder_name FROM tickets WHERE id = $1 AND event_id = $2`,
+      [ticketId, eventId]
+    );
+
+    if (!ticketRes.rows.length) {
+      await client.query('ROLLBACK');
+      return res.status(404).json({ error: 'Ticket introuvable pour cet événement' });
+    }
+
+    const { category_id, event_id, holder_name } = ticketRes.rows[0];
+
+    // 2. Supprimer le paiement associé (si existe)
+    await client.query(`DELETE FROM payments WHERE ticket_id = $1`, [ticketId]);
+
+    // 3. Hard delete : supprimer définitivement le ticket
+    await client.query(`DELETE FROM tickets WHERE id = $1`, [ticketId]);
+
+    // 4. Libérer la place dans la catégorie
+    await client.query(
+      `UPDATE ticket_categories SET available_quantity = available_quantity + 1 WHERE id = $1`,
+      [category_id]
+    );
+
+    // 5. Mettre à jour les statistiques de l'événement
+    await client.query(
+      `UPDATE events SET
+        available_tickets = available_tickets + 1,
+        total_tickets = total_tickets - 1
+       WHERE id = $1`,
+      [event_id]
+    );
+
+    await client.query('COMMIT');
+    res.json({
+      success: true,
+      message: `Participant "${holder_name}" et son ticket ont été supprimés définitivement. Les statistiques ont été mises à jour.`,
+      ticketId: ticketId
+    });
+  } catch (err) {
+    await client.query('ROLLBACK');
+    console.error("Erreur hardDeleteAttendee:", err);
+    res.status(500).json({ error: err.message });
+  } finally {
+    client.release();
+  }
+};
+
+// =============================================
+// EXPORT UNIQUE DES FONCTIONS (Corrigé : plus de doublon)
+// =============================================
 module.exports = {
-  getAllEvents, getEvent, getEventById, createEvent,
-  updateEvent, deleteEvent, getAttendees, getAdminEvents
+  getAllEvents,
+  getEvent,
+  getEventById,
+  createEvent,
+  updateEvent,
+  deleteEvent,
+  getAttendees,
+  getAdminEvents,
+  deleteAttendee,    // ✅ Soft delete
+  hardDeleteAttendee // ✅ Hard delete
 };
