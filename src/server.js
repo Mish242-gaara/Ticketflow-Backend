@@ -111,4 +111,24 @@ app.listen(PORT, () => {
   console.log(`   Mode : ${process.env.NODE_ENV || 'development'}`);
 });
 
+// =============================================
+// ANTI-COLD START (Keep-Alive)
+// =============================================
+if (process.env.NODE_ENV === 'production') {
+  const BACKEND_URL = process.env.BACKEND_URL || 'https://ticketflow-backend-9xkf.onrender.com';
+  
+  setInterval(async () => {
+    try {
+      const response = await fetch(`${BACKEND_URL}/health`);
+      if (response.ok) {
+        console.log(`[Keep-Alive] Ping réussi : ${new Date().toISOString()}`);
+      }
+    } catch (error) {
+      console.error('[Keep-Alive] Échec du ping:', error.message);
+    }
+  }, 300000); // 300 000 ms = 5 minutes
+  
+  console.log('✅ [Server] Anti-Cold Start activé.');
+}
+
 module.exports = app;
