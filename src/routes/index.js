@@ -7,13 +7,11 @@ const { handlePawaPayWebhook } = require('../services/paymentService');
 const { handleMtnWebhook } = require('../services/mtnMomoService');
 
 // =============================================
-// IMPORTS DES CONTRÔLEURS
+// IMPORTS DES CONTRÔLEURS (Vérifiez bien que chaque fichier exporte ces fonctions)
 // =============================================
-// Note : getAllUsers retiré de authController
-const { register, login, me, updateProfile, sendAnnouncement, getAnnouncements } = require('../controllers/authController');
-// Note : getAllUsers ajouté ici dans userController
+const { register, login, me, updateProfile } = require('../controllers/authController');
 const { getAllUsers, deleteUser, blockUser, unblockUser } = require('../controllers/userController');
-const { deleteAnnouncement, deleteAllAnnouncements } = require('../controllers/announcementController');
+const { sendAnnouncement, getAnnouncements, deleteAnnouncement, deleteAllAnnouncements } = require('../controllers/announcementController');
 const { getAllEvents, getEvent, getEventById, createEvent, updateEvent, deleteEvent, getAttendees, getAdminEvents, deleteAttendee, hardDeleteAttendee } = require('../controllers/eventController');
 const { reserveTicket, checkPayment, myTickets, getTicket, downloadTicket, verifyTicket, getAdminStats, validatePaymentManually, getPendingTickets } = require('../controllers/ticketController');
 
@@ -25,21 +23,11 @@ router.post('/auth/login', login);
 router.get('/auth/me', authMiddleware, me);
 router.put('/auth/profile', authMiddleware, updateProfile);
 
-// ✅ Google OAuth
-router.get('/auth/google',
-  passport.authenticate('google', {
-    scope: ['profile', 'email']
-  })
-);
+router.get('/auth/google', passport.authenticate('google', { scope: ['profile', 'email'] }));
 
 router.get('/auth/google/callback',
-  passport.authenticate('google', {
-    failureRedirect: `${process.env.FRONTEND_URL || 'http://localhost:5173'}/login?error=google`
-  }),
+  passport.authenticate('google', { failureRedirect: `${process.env.FRONTEND_URL || 'http://localhost:5173'}/login?error=google` }),
   (req, res) => {
-    if (!req.user || !req.user.token || !req.user.user) {
-      return res.redirect(`${process.env.FRONTEND_URL || 'http://localhost:5173'}/login?error=google_incomplete`);
-    }
     const { token, user } = req.user;
     const frontendUrl = process.env.FRONTEND_URL || 'http://localhost:5173';
     res.redirect(`${frontendUrl}/auth/callback?token=${token}&user=${encodeURIComponent(JSON.stringify(user))}`);
