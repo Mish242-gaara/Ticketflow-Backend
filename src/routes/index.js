@@ -9,8 +9,10 @@ const { handleMtnWebhook } = require('../services/mtnMomoService');
 // =============================================
 // IMPORTS DES CONTRÔLEURS
 // =============================================
-const { register, login, me, updateProfile, getAllUsers, sendAnnouncement, getAnnouncements } = require('../controllers/authController');
-const { deleteUser, blockUser, unblockUser } = require('../controllers/userController');
+// Note : getAllUsers retiré de authController
+const { register, login, me, updateProfile, sendAnnouncement, getAnnouncements } = require('../controllers/authController');
+// Note : getAllUsers ajouté ici dans userController
+const { getAllUsers, deleteUser, blockUser, unblockUser } = require('../controllers/userController');
 const { deleteAnnouncement, deleteAllAnnouncements } = require('../controllers/announcementController');
 const { getAllEvents, getEvent, getEventById, createEvent, updateEvent, deleteEvent, getAttendees, getAdminEvents, deleteAttendee, hardDeleteAttendee } = require('../controllers/eventController');
 const { reserveTicket, checkPayment, myTickets, getTicket, downloadTicket, verifyTicket, getAdminStats, validatePaymentManually, getPendingTickets } = require('../controllers/ticketController');
@@ -23,7 +25,7 @@ router.post('/auth/login', login);
 router.get('/auth/me', authMiddleware, me);
 router.put('/auth/profile', authMiddleware, updateProfile);
 
-// ✅ Google OAuth corrigé
+// ✅ Google OAuth
 router.get('/auth/google',
   passport.authenticate('google', {
     scope: ['profile', 'email']
