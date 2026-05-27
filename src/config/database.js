@@ -1,39 +1,59 @@
 const { Pool } = require('pg');
+
+// ✅ Charge les variables d'environnement (pour le développement local)
 require('dotenv').config();
 
-let pool;
+// ✅ Configuration du Pool PostgreSQL
+const pool = new Pool({
+  connectionString: process.env.DATABASE_URL,
+  // ✅ Configuration SSL pour Neon (obligatoire en production)
+  ssl: process.env.NODE_ENV === 'production' ? {
+    rejectUnauthorized: false, // ✅ Nécessaire pour Neon (certificats auto-signés)
+  } : false, // ✅ Désactive SSL en local si pas de certificat valide
+  // ✅ Options supplémentaires pour éviter les warnings
+  connectionInitSql: "SET time_zone = 'UTC';",
+  // ✅ Timeout pour éviter les connexions bloquées
+  connectionTimeoutMillis: 5000,
+  idleTimeoutMillis: 30000,
+});
 
-// Si DATABASE_URL est fournie (Production sur Render / URL Neon directe)
-if (process.env.DATABASE_URL) {
-  pool = new Pool({
-    connectionString: process.env.DATABASE_URL,
-    // Configuration SSL indispensable pour Neon en production
-    ssl: {
-      rejectUnauthorized: false
-    }
-  });
-} else {
-  // Mode de secours (Local) si tu utilises encore des variables séparées en local
-  pool = new Pool({
-    host: process.env.DB_HOST || 'localhost',
-    port: process.env.DB_PORT || 5432,
-    database: process.env.DB_NAME || 'ticket_platform',
-    user: process.env.DB_USER || 'postgres',
-    password: process.env.DB_PASSWORD,
-  });
-}
-
+// ✅ Gestion des événements de connexion
 pool.on('connect', () => {
   console.log('✅ Connecté avec succès à PostgreSQL (Neon/Local)');
 });
 
 pool.on('error', (err) => {
-  console.error('❌ Erreur PostgreSQL inattendue sur le pool:', err.message);
-  // En production, on évite de faire process.exit(-1) pour que le serveur Render 
-  // ne crashe pas définitivement à la moindre micro-coupure réseau de la BDD.
+  console.error('❌ Erreur PostgreSQL inattendue:', err.message);
+  // ✅ En production (Render), on ne crash pas le serveur pour une erreur de connexion
   if (process.env.NODE_ENV !== 'production') {
     process.exit(-1);
   }
 });
 
-module.exports = pool;
+// ✅ Teste la connexion au démarrage (optionnel mais utile pour déboguer)
+async function testDatabaseConnection() {
+  try {
+    const client = await pool.connect();
+    const result = await client.query('SELECT 1');
+    client.release();
+    console.log('✅ Test de connexion PostgreSQL réussi:', result.rows[0]);
+  } catch (err) {
+    console.error('❌ Test de connexion PostgreSQL échoué:', err.message);
+    // ✅ En production, on ne crash pas, mais on log l'erreur
+    if (process.env.NODE_ENV !== 'production') {
+      process.exit(-1);
+    }
+  }
+}
+
+// ✅ Appelle le test si NODE_ENV est développement (pour déboguer localement)
+if (process.env.NODE_ENV === 'development') {
+  testDatabaseConnection();
+}
+
+// ✅ Exporte le pool ET une méthode query pour la rétrocompatibilité
+module.exports = {
+  pool,
+  query: (text, params) => pool.query(text, params),
+  getClient: () => pool.connect(),
+};
