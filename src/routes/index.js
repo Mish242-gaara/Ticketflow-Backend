@@ -7,7 +7,7 @@ const { handlePawaPayWebhook } = require('../services/paymentService');
 const { handleMtnWebhook } = require('../services/mtnMomoService');
 
 // =============================================
-// IMPORTS DES CONTRÔLEURS (CORRIGÉS)
+// IMPORTS DES CONTRÔLEURS
 // =============================================
 // ✅ Contrôleurs Auth
 const {
@@ -72,7 +72,6 @@ router.put('/auth/profile', authMiddleware, updateProfile);
 router.get('/auth/google',
   passport.authenticate('google', {
     scope: ['profile', 'email'],
-    // ✅ Ajoute explicitement redirect_uri pour éviter les erreurs Google OAuth
     redirect_uri: process.env.GOOGLE_CALLBACK_URI || 'https://ticketflow-backend-9xkf.onrender.com/api/auth/google/callback'
   })
 );
@@ -126,13 +125,13 @@ router.post('/webhooks/mtn', express.json(), handleMtnWebhook);
 // =============================================
 router.get('/admin/stats', authMiddleware, adminMiddleware, getAdminStats);
 
-// ✅ Routes Utilisateurs (importées depuis userController.js)
+// ✅ Routes Utilisateurs
 router.get('/admin/users', authMiddleware, adminMiddleware, getAllUsers);
 router.delete('/admin/users/:userId', authMiddleware, adminMiddleware, deleteUser);
 router.post('/admin/users/:userId/block', authMiddleware, adminMiddleware, blockUser);
 router.post('/admin/users/:userId/unblock', authMiddleware, adminMiddleware, unblockUser);
 
-// ✅ Routes Annonces (importées depuis announcementController.js)
+// ✅ Routes Annonces
 router.post('/admin/announcements', authMiddleware, adminMiddleware, sendAnnouncement);
 router.get('/admin/announcements', authMiddleware, adminMiddleware, getAnnouncements);
 router.delete('/admin/announcements/:announcementId', authMiddleware, adminMiddleware, deleteAnnouncement);

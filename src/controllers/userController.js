@@ -1,6 +1,6 @@
 const { pool } = require('../config/database');
 
-// ✅ Récupérer tous les utilisateurs (avec gestion des erreurs améliorée)
+// ✅ Récupérer tous les utilisateurs
 const getAllUsers = async (req, res) => {
   try {
     console.log('🔹 [getAllUsers] Début de la récupération des utilisateurs...');
@@ -15,16 +15,16 @@ const getAllUsers = async (req, res) => {
         u.provider,
         u.avatar_url,
         u.created_at,
-        u.is_blocked,
+        COALESCE(u.is_blocked, false) as is_blocked,
         u.unblock_at,
         COUNT(t.id) as tickets_count
       FROM users u
       LEFT JOIN tickets t ON t.user_id = u.id
-      GROUP BY u.id
+      GROUP BY u.id, u.is_blocked, u.unblock_at
       ORDER BY u.created_at DESC
     `);
 
-    console.log(`🔹 [getAllUsers] ${result.rows.length} utilisateurs récupérés.`);
+    console.log(`✅ [getAllUsers] ${result.rows.length} utilisateurs récupérés.`);
     res.json({ users: result.rows, count: result.rows.length });
   } catch (err) {
     console.error('❌ [getAllUsers] Erreur:', err.message);
@@ -35,7 +35,7 @@ const getAllUsers = async (req, res) => {
   }
 };
 
-// ✅ Supprimer un utilisateur (avec transactions)
+// ✅ Supprimer un utilisateur
 const deleteUser = async (req, res) => {
   const { userId } = req.params;
   const client = await pool.connect();
