@@ -7,9 +7,9 @@ const { handlePawaPayWebhook } = require('../services/paymentService');
 const { handleMtnWebhook } = require('../services/mtnMomoService');
 
 // =============================================
-// IMPORTS DES CONTRÔLEURS (CORRIGÉ)
+// IMPORTS DES CONTRÔLEURS (CORRIGÉS)
 // =============================================
-// ✅ Contrôleurs Auth (pour l'authentification)
+// ✅ Contrôleurs Auth
 const {
   register,
   login,
@@ -17,23 +17,23 @@ const {
   updateProfile
 } = require('../controllers/authController');
 
-// ✅ Contrôleurs Utilisateurs (pour /admin/users, etc.)
+// ✅ Contrôleurs Utilisateurs
 const {
-  getAllUsers,       // ✅ Déplacé ici depuis userController
+  getAllUsers,
   deleteUser,
   blockUser,
   unblockUser
 } = require('../controllers/userController');
 
-// ✅ Contrôleurs Annonces (pour /admin/announcements, etc.)
+// ✅ Contrôleurs Annonces
 const {
   sendAnnouncement,
-  getAnnouncements,   // ✅ Déplacé ici depuis announcementController
+  getAnnouncements,
   deleteAnnouncement,
   deleteAllAnnouncements
 } = require('../controllers/announcementController');
 
-// ✅ Contrôleurs Events
+// ✅ Contrôleurs Événements
 const {
   getAllEvents,
   getEvent,
@@ -68,10 +68,12 @@ router.post('/auth/login', login);
 router.get('/auth/me', authMiddleware, me);
 router.put('/auth/profile', authMiddleware, updateProfile);
 
-// Google OAuth
+// ✅ Google OAuth
 router.get('/auth/google',
   passport.authenticate('google', {
-    scope: ['profile', 'email']
+    scope: ['profile', 'email'],
+    // ✅ Ajoute explicitement redirect_uri pour éviter les erreurs Google OAuth
+    redirect_uri: process.env.GOOGLE_CALLBACK_URI || 'https://ticketflow-backend-9xkf.onrender.com/api/auth/google/callback'
   })
 );
 
@@ -81,16 +83,18 @@ router.get('/auth/google/callback',
   }),
   (req, res) => {
     if (!req.user || !req.user.token || !req.user.user) {
+      console.error('❌ [Google OAuth Callback] req.user est vide ou incomplet');
       return res.redirect(`${process.env.FRONTEND_URL || 'http://localhost:5173'}/login?error=google_incomplete`);
     }
     const { token, user } = req.user;
     const frontendUrl = process.env.FRONTEND_URL || 'http://localhost:5173';
+    console.log(`✅ [Google OAuth Callback] Redirection vers ${frontendUrl}/auth/callback`);
     res.redirect(`${frontendUrl}/auth/callback?token=${token}&user=${encodeURIComponent(JSON.stringify(user))}`);
   }
 );
 
 // =============================================
-// ROUTES EVENTS
+// ROUTES ÉVÉNEMENTS
 // =============================================
 router.get('/events', getAllEvents);
 router.get('/events/:slug', getEvent);
@@ -134,11 +138,11 @@ router.get('/admin/announcements', authMiddleware, adminMiddleware, getAnnouncem
 router.delete('/admin/announcements/:announcementId', authMiddleware, adminMiddleware, deleteAnnouncement);
 router.delete('/admin/announcements', authMiddleware, adminMiddleware, deleteAllAnnouncements);
 
-// Validation des paiements
+// ✅ Routes Tickets Admin
 router.get('/admin/tickets/pending', authMiddleware, adminMiddleware, getPendingTickets);
 router.post('/admin/tickets/validate/:txRef', authMiddleware, adminMiddleware, validatePaymentManually);
 
-// Suppression de participants
+// ✅ Routes Participants
 router.delete('/events/:eventId/attendees/:ticketId', authMiddleware, adminMiddleware, deleteAttendee);
 router.delete('/events/:eventId/attendees/:ticketId/hard', authMiddleware, adminMiddleware, hardDeleteAttendee);
 
