@@ -145,4 +145,4 @@ router.post('/admin/tickets/validate/:txRef', authMiddleware, adminMiddleware, v
 router.delete('/events/:eventId/attendees/:ticketId', authMiddleware, adminMiddleware, deleteAttendee);
 router.delete('/events/:eventId/attendees/:ticketId/hard', authMiddleware, adminMiddleware, hardDeleteAttendee);
 
-module
+module.exports = router;
