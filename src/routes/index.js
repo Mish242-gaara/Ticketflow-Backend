@@ -72,7 +72,7 @@ router.put('/auth/profile', authMiddleware, updateProfile);
 router.get('/auth/google',
   passport.authenticate('google', {
     scope: ['profile', 'email'],
-    redirect_uri: process.env.GOOGLE_CALLBACK_URI || 'https://ticketflow-backend-9xkf.onrender.com/api/auth/google/callback'
+    redirect_uri: process.env.GOOGLE_CALLBACK_URI || 'https://ticketflow-backend-h7m6.onrender.com/api/auth/google/callback'
   })
 );
 

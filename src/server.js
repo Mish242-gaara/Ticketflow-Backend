@@ -115,7 +115,7 @@ app.listen(PORT, () => {
 // ANTI-COLD START (Keep-Alive)
 // =============================================
 if (process.env.NODE_ENV === 'production') {
-  const BACKEND_URL = process.env.BACKEND_URL || 'https://ticketflow-backend-9xkf.onrender.com';
+  const BACKEND_URL = process.env.BACKEND_URL || 'https://ticketflow-backend-h7m6.onrender.com';
   
   setInterval(async () => {
     try {

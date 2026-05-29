@@ -5,7 +5,7 @@ const database = require('./database');
 const pool = database.pool || database;
 
 // ✅ URL de callback sécurisée
-const GOOGLE_CALLBACK_URI = process.env.GOOGLE_CALLBACK_URI || 'https://ticketflow-backend-9xkf.onrender.com/api/auth/google/callback';
+const GOOGLE_CALLBACK_URI = process.env.GOOGLE_CALLBACK_URI || 'https://ticketflow-backend-h7m6.onrender.com/api/auth/google/callback';
 
 console.log('🔹 [Passport] GOOGLE_CALLBACK_URI utilisé:', GOOGLE_CALLBACK_URI);
 
