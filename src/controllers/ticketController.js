@@ -14,7 +14,7 @@ const reserveTicket = async (req, res) => {
     });
   }
 
-  const client = await pool.connect(); // ✅ Utilisation correcte de pool.connect()
+  const client = await pool.connect();
   try {
     await client.query('BEGIN');
 
@@ -114,7 +114,7 @@ const reserveTicket = async (req, res) => {
       details: process.env.NODE_ENV === 'development' ? err.message : undefined
     });
   } finally {
-    client.release(); // ✅ Libération du client
+    client.release();
   }
 };
 
@@ -150,7 +150,332 @@ const checkPayment = async (req, res) => {
   }
 };
 
-// POST /api/tickets/admin/validate-payment/:txRef
+// GET /api/tickets/my
+const myTickets = async (req, res) => {
+  try {
+    const result = await pool.query(
+      `SELECT t.*, e.title AS event_title, e.date AS event_date, e.location AS event_location,
+              e.banner_url, tc.name AS category_name, tc.price, tc.color,
+              p.payment_status, p.method AS payment_method, p.transaction_id
+       FROM tickets t
+       LEFT JOIN events e ON e.id = t.event_id
+       LEFT JOIN ticket_categories tc ON tc.id = t.category_id
+       LEFT JOIN payments p ON p.ticket_id = t.id
+       WHERE t.user_id = $1
+       ORDER BY t.created_at DESC`,
+      [req.user.id]
+    );
+
+    return res.json({ tickets: result.rows });
+  } catch (err) {
+    console.error('Erreur récupération tickets:', err);
+    return res.status(500).json({
+      error: 'Erreur serveur lors de la récupération des tickets'
+    });
+  }
+};
+
+// GET /api/tickets/:uuid
+const getTicket = async (req, res) => {
+  try {
+    const result = await pool.query(
+      `SELECT t.*, e.title AS event_title, e.date AS event_date, e.location AS event_location,
+              e.organizer, tc.name AS category_name, tc.price, tc.color, tc.description AS category_description
+       FROM tickets t
+       LEFT JOIN events e ON e.id = t.event_id
+       LEFT JOIN ticket_categories tc ON tc.id = t.category_id
+       WHERE t.ticket_uuid = $1`,
+      [req.params.uuid]
+    );
+
+    if (!result.rows.length) {
+      return res.status(404).json({ error: 'Ticket introuvable' });
+    }
+
+    return res.json({ ticket: result.rows[0] });
+  } catch (err) {
+    console.error('Erreur récupération ticket:', err);
+    return res.status(500).json({
+      error: 'Erreur serveur lors de la récupération du ticket'
+    });
+  }
+};
+
+// GET /api/tickets/:uuid/download
+const downloadTicket = async (req, res) => {
+  try {
+    const result = await pool.query(
+      `SELECT t.*, e.title AS event_title, e.date, e.location, e.organizer,
+              tc.name AS category_name, tc.price, tc.color
+       FROM tickets t
+       LEFT JOIN events e ON e.id = t.event_id
+       LEFT JOIN ticket_categories tc ON tc.id = t.category_id
+       WHERE t.ticket_uuid = $1`,
+      [req.params.uuid]
+    );
+
+    if (!result.rows.length) {
+      return res.status(404).json({ error: 'Ticket introuvable' });
+    }
+
+    const ticket = result.rows[0];
+    const event = {
+      title: ticket.event_title,
+      date: ticket.date,
+      location: ticket.location,
+      organizer: ticket.organizer
+    };
+    const category = {
+      name: ticket.category_name,
+      price: ticket.price,
+      color: ticket.color
+    };
+
+    const pdfBuffer = await generateTicketPDF(ticket, event, category);
+
+    res.setHeader('Content-Type', 'application/pdf');
+    res.setHeader(
+      'Content-Disposition',
+      `attachment; filename="ticket-${ticket.ticket_uuid.slice(0, 8)}.pdf"`
+    );
+
+    return res.send(pdfBuffer);
+  } catch (err) {
+    console.error('Erreur génération PDF:', err);
+    return res.status(500).json({
+      error: 'Erreur serveur lors de la génération du PDF'
+    });
+  }
+};
+
+// POST /api/verify-ticket (admin scanner only)
+const verifyTicket = async (req, res) => {
+  const { qr_data } = req.body;
+  if (!qr_data) {
+    return res.status(400).json({ error: 'qr_data est requis' });
+  }
+  const client = await pool.connect();
+  try {
+    let parsed;
+    try {
+      parsed = JSON.parse(qr_data);
+    } catch {
+      return res.json({
+        result: 'INVALID',
+        message: '⛔ QR code invalide'
+      });
+    }
+
+    const { uuid, token } = parsed;
+    if (!uuid || !token) {
+      return res.json({
+        result: 'INVALID',
+        message: '⛔ QR code malformé'
+      });
+    }
+
+    if (!verifyQRToken(token, uuid)) {
+      await pool.query(
+        `INSERT INTO scans (ticket_id, scanned_by, result, ip_address)
+         SELECT id, $1, 'INVALID', $2
+         FROM tickets
+         WHERE ticket_uuid = $3`,
+        [req.user.id, req.ip, uuid]
+      );
+
+      return res.json({
+        result: 'INVALID',
+        message: '⛔ QR code non authentique'
+      });
+    }
+
+    await client.query('BEGIN');
+
+    const ticketRes = await client.query(
+      `SELECT id, status, ticket_uuid, holder_name, holder_phone, event_id, category_id, scanned_at
+       FROM tickets
+       WHERE ticket_uuid = $1
+       FOR UPDATE`,
+      [uuid]
+    );
+
+    if (!ticketRes.rows.length) {
+      await client.query('ROLLBACK');
+      return res.json({
+        result: 'INVALID',
+        message: '⛔ Ticket introuvable en base'
+      });
+    }
+
+    const ticket = ticketRes.rows[0];
+
+    const detailsRes = await client.query(
+      `SELECT e.title AS event_title, tc.name AS category_name, tc.color
+       FROM events e, ticket_categories tc
+       WHERE e.id = $1 AND tc.id = $2`,
+      [ticket.event_id, ticket.category_id]
+    );
+
+    const details = detailsRes.rows[0] || {};
+
+    if (ticket.status === 'used' || ticket.status === 'scanned') {
+      await client.query('ROLLBACK');
+
+      await pool.query(
+        `INSERT INTO scans (ticket_id, scanned_by, result, ip_address)
+         VALUES ($1, $2, 'USED', $3)`,
+        [ticket.id, req.user.id, req.ip]
+      );
+
+      return res.json({
+        result: 'USED',
+        message: '🔴 Ticket déjà utilisé',
+        ticket: {
+          holder_name: ticket.holder_name,
+          scanned_at: ticket.scanned_at,
+          category_name: details.category_name,
+          event_title: details.event_title
+        }
+      });
+    }
+
+    if (ticket.status !== 'active') {
+      await client.query('ROLLBACK');
+      return res.json({
+        result: 'INVALID',
+        message: `⛔ Ticket non valide (statut: ${ticket.status})`
+      });
+    }
+
+    await client.query(
+      `UPDATE tickets
+       SET status = 'scanned', scanned_at = NOW(), scanned_by = $1, updated_at = NOW()
+       WHERE id = $2`,
+      [req.user.id, ticket.id]
+    );
+
+    await client.query(
+      `INSERT INTO scans (ticket_id, scanned_by, result, ip_address)
+       VALUES ($1, $2, 'VALID', $3)`,
+      [ticket.id, req.user.id, req.ip]
+    );
+
+    await client.query('COMMIT');
+
+    return res.json({
+      result: 'VALID',
+      message: '✅ Ticket valide — Entrée autorisée',
+      ticket: {
+        holder_name: ticket.holder_name,
+        holder_phone: ticket.holder_phone,
+        category_name: details.category_name,
+        color: details.color,
+        event_title: details.event_title
+      }
+    });
+
+  } catch (err) {
+    await client.query('ROLLBACK');
+    console.error('Erreur vérification ticket:', err);
+    return res.status(500).json({
+      error: 'Erreur serveur lors de la vérification du ticket',
+      details: process.env.NODE_ENV === 'development' ? err.message : undefined
+    });
+  } finally {
+    client.release();
+  }
+};
+
+// GET /api/admin/stats
+const getAdminStats = async (req, res) => {
+  try {
+    const [totals, revenue, byCategory, recentTickets, scanStats] = await Promise.all([
+      pool.query(
+        `SELECT COUNT(*) AS total,
+                COUNT(*) FILTER (WHERE status IN ('active', 'used', 'scanned')) AS active,
+                COUNT(*) FILTER (WHERE status IN ('used', 'scanned')) AS scanned,
+                COUNT(*) FILTER (WHERE status = 'pending') AS pending
+         FROM tickets`
+      ),
+      pool.query(
+        `SELECT COALESCE(SUM(amount), 0) AS total
+         FROM payments
+         WHERE payment_status = 'success' OR payment_status = 'completed'`
+      ),
+      pool.query(
+        `SELECT tc.name,
+                tc.color,
+                COUNT(t.id) AS count,
+                tc.price,
+                tc.available_quantity,
+                tc.total_quantity
+         FROM ticket_categories tc
+         LEFT JOIN tickets t ON t.category_id = tc.id
+         GROUP BY tc.id, tc.name, tc.color, tc.price, tc.available_quantity, tc.total_quantity
+         ORDER BY tc.price ASC`
+      ),
+      pool.query(
+        `SELECT t.holder_name,
+                t.status,
+                t.created_at,
+                tc.name AS category,
+                tc.color
+         FROM tickets t
+         LEFT JOIN ticket_categories tc ON tc.id = t.category_id
+         ORDER BY t.created_at DESC
+         LIMIT 8`
+      ),
+      pool.query(
+        `SELECT DATE(scanned_at) AS date,
+                COUNT(*) AS count
+         FROM scans
+         WHERE result = 'VALID'
+           AND scanned_at > NOW() - INTERVAL '7 days'
+         GROUP BY DATE(scanned_at)
+         ORDER BY date`
+      )
+    ]);
+
+    return res.json({
+      stats: {
+        ...totals.rows[0],
+        revenue: parseFloat(revenue.rows[0].total),
+        by_category: byCategory.rows,
+        recent_tickets: recentTickets.rows,
+        scan_stats: scanStats.rows
+      }
+    });
+  } catch (err) {
+    console.error('Erreur récupération stats:', err);
+    return res.status(500).json({
+      error: 'Erreur serveur lors de la récupération des statistiques'
+    });
+  }
+};
+
+// GET /api/admin/tickets/pending
+const getPendingTickets = async (req, res) => {
+  try {
+    const result = await pool.query(
+      `SELECT t.id AS ticket_id, t.ticket_uuid, t.holder_name, t.holder_phone,
+              t.status AS ticket_status, e.title AS event_title,
+              COALESCE(p.payment_status, 'non_initie') AS payment_status,
+              p.transaction_id AS tx_ref, p.amount, tc.name AS category_name
+       FROM tickets t
+       LEFT JOIN events e ON e.id = t.event_id
+       LEFT JOIN ticket_categories tc ON tc.id = t.category_id
+       LEFT JOIN payments p ON p.ticket_id = t.id
+       WHERE t.status = 'pending'
+       ORDER BY t.created_at DESC`
+    );
+    return res.json({ tickets: result.rows });
+  } catch (err) {
+    console.error('Erreur getPendingTickets:', err);
+    return res.status(500).json({ error: 'Erreur serveur' });
+  }
+};
+
+// POST /api/admin/tickets/validate/:txRef
 const validatePaymentManually = async (req, res) => {
   const { txRef } = req.params;
   const { action } = req.body;
@@ -159,7 +484,7 @@ const validatePaymentManually = async (req, res) => {
     return res.status(400).json({ error: "L'action est requise et doit être 'approve' ou 'reject'" });
   }
 
-  const client = await pool.connect(); // ✅ Utilisation correcte de pool.connect()
+  const client = await pool.connect();
   try {
     if (action === 'approve') {
       await _activateTicket(txRef, 'MANUAL_APPROVAL');
@@ -233,10 +558,11 @@ const validatePaymentManually = async (req, res) => {
       details: process.env.NODE_ENV === 'development' ? err.message : undefined
     });
   } finally {
-    client.release(); // ✅ Libération du client
+    client.release();
   }
 };
 
+// GET /api/tickets/my
 module.exports = {
   reserveTicket,
   checkPayment,
