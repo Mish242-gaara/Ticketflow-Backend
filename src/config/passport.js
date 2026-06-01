@@ -46,11 +46,16 @@ passport.use(new GoogleStrategy({
           );
         }
       } else {
-        // Création nouvel utilisateur
+        // Création nouvel utilisateur avec une gestion d'upsert pour éviter les erreurs
         const newUserRes = await pool.query(
           `INSERT INTO users 
            (fullname, email, google_id, avatar_url, provider, password, role) 
-           VALUES ($1, $2, $3, $4, 'google', NULL, 'user') 
+           VALUES ($1, $2, $3, $4, 'google', NULL, 'user')
+           ON CONFLICT (google_id) 
+           DO UPDATE SET 
+             fullname = EXCLUDED.fullname,
+             avatar_url = EXCLUDED.avatar_url,
+             updated_at = NOW()
            RETURNING *`,
           [name, email, googleId, avatar]
         );
