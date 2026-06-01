@@ -1,4 +1,4 @@
-const { pool } = require('../config/database');
+const pool = require('../config/database');
 
 // ✅ Envoyer une annonce
 const sendAnnouncement = async (req, res) => {
