@@ -131,7 +131,7 @@ router.delete('/admin/users/:userId', authMiddleware, adminMiddleware, deleteUse
 router.post('/admin/users/:userId/block', authMiddleware, adminMiddleware, blockUser);
 router.post('/admin/users/:userId/unblock', authMiddleware, adminMiddleware, unblockUser);
 
-// ✅ Routes Annonces
+// ✅ Routes Annonces (CORRIGÉES)
 router.post('/admin/announcements', authMiddleware, adminMiddleware, sendAnnouncement);
 router.get('/admin/announcements', authMiddleware, adminMiddleware, getAnnouncements);
 router.delete('/admin/announcements/:announcementId', authMiddleware, adminMiddleware, deleteAnnouncement);
